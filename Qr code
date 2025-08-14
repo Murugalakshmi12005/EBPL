@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>QR Scanner + Generator</title>
+<!-- Fallback decoder + generator libraries -->
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+<style>
+  :root { --bg:#0f172a; --card:#111827; --muted:#94a3b8; --fg:#e5e7eb; --accent:#60a5fa; }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial}
+  .wrap{max-width:1000px;margin:32px auto;padding:16px}
+  h1{font-size:clamp(22px,3vw,30px);margin:0 0 16px}
+  .grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+  .card{background:var(--card);border:1px solid #1f2937;border-radius:16px;padding:16px;box-shadow:0 10px 24px rgba(0,0,0,.25)}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:8px 0}
+  button,select,input,textarea{
+    background:#0b1220;color:var(--fg);border:1px solid #263043;border-radius:10px;
+    padding:10px 12px;font-size:14px
+  }
+  button{cursor:pointer}
+  button.primary{background:var(--accent);color:#0b1220;border:none;font-weight:600}
+  button:disabled{opacity:.6;cursor:not-allowed}
+  video{width:100%;border-radius:12px;background:black}
+  canvas{display:none}
+  .result{padding:10px;background:#0b1220;border:1px dashed #334155;border-radius:10px;word-break:break-all}
+  a.link{color:#93c5fd;text-decoration:none}
+  .hint{color:var(--muted);font-size:12px}
+  .qr-img{width:100%;max-width:320px;background:white;border-radius:12px;padding:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>QR Code Scanner & Generator</h1>
+
+  <div class="grid">
+    <!-- Scanner -->
+    <section class="card">
+      <h2>Scanner</h2>
+
+      <div class="row">
+        <select id="cameraSelect" title="Choose camera"></select>
+        <button id="startBtn" class="primary">Start Camera</button>
+        <button id="stopBtn">Stop</button>
+        <label class="hint">or scan an image: <input type="file" id="fileInput" accept="image/*" /></label>
+      </div>
+
+      <video id="video" playsinline></video>
+      <canvas id="canvas"></canvas>
+
+      <div class="row">
+        <button id="torchBtn" disabled>Toggle Torch</button>
+        <button id="copyBtn" disabled>Copy Result</button>
+        <a id="openLink" class="link" href="#" target="_blank" rel="noopener" hidden>Open as link</a>
+      </div>
+
+      <div class="result" id="scanResult">Result will appear here…</div>
+      <p class="hint">Tip: Camera access requires HTTPS or localhost.</p>
+    </section>
+
+    <!-- Generator -->
+    <section class="card">
+      <h2>Generator</h2>
+      <div class="row">
+        <textarea id="genText" rows="5" style="width:100%" placeholder="Enter text / URL to encode"></textarea>
+      </div>
+      <div class="row">
+        <label>Size
+          <input id="genSize" type="number" min="128" max="1024" value="320" style="width:90px;margin-left:8px">
+        </label>
+        <button id="makeBtn" class="primary">Generate</button>
+        <a id="downloadBtn" class="link" href="#" download="qrcode.png" hidden>Download PNG</a>
+      </div>
+      <div id="genPreview"></div>
+    </section>
+  </div>
+</div>
+
+<script>
+(() => {
+  // Elements
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  const cameraSelect = document.getElementById('cameraSelect');
+  const startBtn = document.getElementById('startBtn');
+  const stopBtn = document.getElementById('stopBtn');
+  const torchBtn = document.getElementById('torchBtn');
+  const fileInput = document.getElementById('fileInput');
+  const scanResultEl = document.getElementById('scanResult');
+  const copyBtn = document.getElementById('copyBtn');
+  const openLink = document.getElementById('openLink');
+
+  const genText = document.getElementById('genText');
+  const genSize = document.getElementById('genSize');
+  const makeBtn = document.getElementById('makeBtn');
+  const genPreview = document.getElementById('genPreview');
+  const downloadBtn = document.getElementById('downloadBtn');
+
+  let stream = null;
+  let scanning = false;
+  let usingBarcodeDetector = false;
+  let videoTrack = null;
+  let imageCapture = null;
+
+  // Populate camera list
+  async function listCameras() {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const vids = devices.filter(d => d.kind === 'videoinput');
+      cameraSelect.innerHTML = vids.map((d, i) =>
+        `<option value="${d.deviceId}">${d.label || `Camera ${i+1}`}</option>`).join('');
+    } catch (e) {
+      console.warn('enumerateDevices failed', e);
+    }
+  }
+
+  // Start camera
+  async function startCamera() {
+    stopCamera();
+    const deviceId = cameraSelect.value || undefined;
+    const constraints = {
+      video: {
+        deviceId: deviceId ? { exact: deviceId } : undefined,
+        facingMode: deviceId ? undefined : { ideal: 'environment' }
+      },
+      audio: false
+    };
+    try {
+      stream = await navigator.mediaDevices.getUserMedia(constraints);
+      video.srcObject = stream;
+      await video.play();
+      videoTrack = stream.getVideoTracks()[0];
+
+      // Torch support
+      torchBtn.disabled = true;
+      imageCapture = null;
+      if ('ImageCapture' in window && videoTrack) {
+        try {
+          imageCapture = new ImageCapture(videoTrack);
+          const caps = await imageCapture.getPhotoCapabilities();
+          if (caps.fillLightMode && caps.fillLightMode.includes('flash')) {
+            torchBtn.disabled = false;
+          }
+        } catch {}
+      }
+
+      // Choose decoding path
+      usingBarcodeDetector = ('BarcodeDetector' in window);
+      scanning = true;
+      scanLoop();
+    } catch (err) {
+      scanResultEl.textContent = 'Camera error: ' + err.message;
+    }
+  }
+
+  // Stop camera
+  function stopCamera() {
+    scanning = false;
+    if (stream) {
+      stream.getTracks().forEach(t => t.stop());
+      stream = null;
+      videoTrack = null;
+    }
+  }
+
+  // Toggle torch (if supported)
+  async function toggleTorch() {
+    if (!videoTrack) return;
+    try {
+      const settings = videoTrack.getSettings();
+      const current = settings.torch === true;
+      await videoTrack.applyConstraints({ advanced: [{ torch: !current }] });
+    } catch (e) {
+      console.warn('Torch not supported', e);
+    }
+  }
+
+  // Scan loop
+  async function scanLoop() {
+    if (!scanning) return;
+
+    if (usingBarcodeDetector) {
+      try {
+        const detector = new BarcodeDetector({ formats: ['qr_code'] });
+        const codes = await detector.detect(video);
+        if (codes.length) {
+          handleResult(codes[0].rawValue);
+        }
+      } catch (e) {
+        // Fallback to jsQR if BarcodeDetector fails during runtime
+        usingBarcodeDetector = false;
+      }
+    }
+
+    if (!usingBarcodeDetector) {
+      // Draw video frame to canvas and decode with jsQR
+      const w = video.videoWidth, h = video.videoHeight;
+      if (w && h) {
+        canvas.width = w; canvas.height = h;
+        ctx.drawImage(video, 0, 0, w, h);
+        const img = ctx.getImageData(0, 0, w, h);
+        const code = jsQR(img.data, img.width, img.height, { inversionAttempts: "dontInvert" });
+        if (code && code.data) {
+          handleResult(code.data);
+        }
+      }
+    }
+
+    if (scanning) requestAnimationFrame(scanLoop);
+  }
+
+  // Handle scan results
+  function handleResult(text) {
+    scanResultEl.textContent = text;
+    copyBtn.disabled = !text;
+    // If looks like URL, show "Open" link
+    try {
+      const url = new URL(text);
+      openLink.href = url.href;
+      openLink.hidden = false;
+    } catch {
+      openLink.hidden = true;
+    }
+  }
+
+  // Scan an uploaded image
+  fileInput.addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const img = new Image();
+    img.onload = () => {
+      canvas.width = img.width; canvas.height = img.height;
+      ctx.drawImage(img, 0, 0);
+      const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const code = jsQR(data.data, data.width, data.height);
+      handleResult(code ? code.data : 'No QR code found in image.');
+    };
+    img.src = URL.createObjectURL(file);
+  });
+
+  // Copy result
+  copyBtn.addEventListener('click', async () => {
+    const text = scanResultEl.textContent.trim();
+    if (!text) return;
+    try { await navigator.clipboard.writeText(text); copyBtn.textContent = 'Copied!'; }
+    catch { copyBtn.textContent = 'Copy failed'; }
+    setTimeout(() => (copyBtn.textContent = 'Copy Result'), 1200);
+  });
+
+  // Buttons
+  startBtn.addEventListener('click', startCamera);
+  stopBtn.addEventListener('click', stopCamera);
+  torchBtn.addEventListener('click', toggleTorch);
+
+  // Load cameras after permission (labels need permission on some browsers)
+  navigator.mediaDevices?.getUserMedia({ video: true, audio: false })
+    .then(s => { s.getTracks().forEach(t => t.stop()); })
+    .finally(listCameras);
+
+  // --- Generator ---
+  function generateQR() {
+    const text = genText.value.trim();
+    const size = Math.min(1024, Math.max(128, parseInt(genSize.value || '320', 10)));
+    if (!text) { genPreview.innerHTML = '<div class="hint">Enter something to encode.</div>'; downloadBtn.hidden = true; return; }
+
+    genPreview.innerHTML = ''; // clear
+    // Using 'qrcode' library to draw to a canvas
+    const canvasOut = document.createElement('canvas');
+    canvasOut.width = size; canvasOut.height = size;
+    genPreview.appendChild(Object.assign(document.createElement('div'), { className: 'qr-img' })).appendChild(canvasOut);
+
+    QRCode.toCanvas(canvasOut, text, { width: size, margin: 2 }, (err) => {
+      if (err) {
+        genPreview.innerHTML = '<div class="hint">Failed to generate QR.</div>';
+        downloadBtn.hidden = true;
+        return;
+      }
+      const dataURL = canvasOut.toDataURL('image/png');
+      downloadBtn.href = dataURL;
+      downloadBtn.hidden = false;
+    });
+  }
+
+  makeBtn.addEventListener('click', generateQR);
+
+})();
+</script>
+</body>
+</html>
