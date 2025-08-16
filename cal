@@ -256,5 +256,6 @@
       refreshDisplay();
     })();
   </script>
+
 </body>
 </html>
