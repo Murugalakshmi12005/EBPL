@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QR Code Scanner & Generator</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      background: #121212;
+      color: #fff;
+      padding: 20px;
+    }
+    h1 {
+      margin-bottom: 20px;
+    }
+    #reader {
+      width: 300px;
+      margin: auto;
+    }
+    #qrcode {
+      margin: 20px auto;
+    }
+    input {
+      padding: 10px;
+      margin: 10px;
+      width: 70%;
+      border-radius: 5px;
+      border: none;
+    }
+    button {
+      padding: 10px 20px;
+      margin: 5px;
+      font-size: 16px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      background: teal;
+      color: white;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>QR Code Scanner & Generator</h1>
+
+  <!-- QR Code Scanner -->
+  <div id="reader"></div>
+  <p>Scanned Result: <span id="result">None</span></p>
+
+  <!-- QR Code Generator -->
+  <h2>Create QR Code</h2>
+  <input type="text" id="qrText" placeholder="Enter text or URL">
+  <button onclick="generateQRCode()">Generate QR</button>
+  <div id="qrcode"></div>
+
+  <!-- Libraries -->
+  <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcodejs/qrcode.min.js"></script>
+
+  <script>
+    // QR Code Scanner
+    function onScanSuccess(decodedText) {
+      document.getElementById("result").innerText = decodedText;
+    }
+
+    let html5QrcodeScanner = new Html5QrcodeScanner(
+      "reader", { fps: 10, qrbox: 250 }
+    );
+    html5QrcodeScanner.render(onScanSuccess);
+
+    // QR Code Generator
+    function generateQRCode() {
+      let qrText = document.getElementById("qrText").value;
+      document.getElementById("qrcode").innerHTML = "";
+      new QRCode(document.getElementById("qrcode"), {
+        text: qrText,
+        width: 200,
+        height: 200
+      });
+    }
+  </script>
+
+</body>
+</html>
