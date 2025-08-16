@@ -1,0 +1,233 @@
+Here’s a single-file HTML + CSS + JS To-Do app (add, edit, delete, mark done, and it saves to localStorage).
+Save as todo.html and open it.
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Task 02 – To-Do List</title>
+  <style>
+    :root{
+      --bg:#0f1220; --card:#171a2b; --accent:#53e0c3; --muted:#8b93a7; --text:#eef2ff;
+      --danger:#ff6b6b;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial;
+      background: radial-gradient(80rem 40rem at 10% 10%, #1e2237 0, var(--bg) 50%);
+      color:var(--text); display:grid; place-items:center; min-height:100svh; padding:16px;
+    }
+    .app{
+      width:min(680px, 100%); background:var(--card); border:1px solid #252a45;
+      border-radius:20px; padding:20px 18px 16px; box-shadow:0 12px 30px rgba(0,0,0,.35);
+    }
+    .title{font-size:clamp(1.2rem, 2.5vw, 1.6rem); letter-spacing:.5px; margin:0 0 12px}
+    .row{
+      display:flex; gap:10px; align-items:center; margin:10px 0 16px;
+      background:#111426; border-radius:14px; padding:10px;
+      border:1px solid #232842;
+    }
+    input[type="text"]{
+      flex:1; background:transparent; border:none; outline:none; color:var(--text);
+      font-size:16px; padding:10px 6px;
+    }
+    button{
+      border:none; cursor:pointer; padding:10px 14px; border-radius:12px; font-weight:600;
+      background:var(--accent); color:#0b1320; transition:transform .04s ease;
+    }
+    button:active{ transform: translateY(1px) }
+    #add-btn{ white-space:nowrap }
+    .muted{ color:var(--muted); font-size:13px; margin:6px 2px 0 }
+    ul{list-style:none; padding:0; margin:10px 0 0; display:grid; gap:8px}
+    li{
+      display:grid; grid-template-columns:auto 1fr auto auto; align-items:center; gap:10px;
+      padding:10px 12px; border-radius:12px; background:#12162a; border:1px solid #252a45;
+    }
+    li.done .text{ text-decoration:line-through; color:#9aa3bd }
+    .text{
+      padding:6px 8px; border-radius:8px; outline:none;
+      word-break:break-word; min-width:40px;
+    }
+    .chip{
+      font-size:12px; padding:4px 8px; background:#0e1223; border:1px solid #2a3157;
+      border-radius:999px; color:#a7b0c9;
+    }
+    .icon-btn{
+      background:#0e1223; color:#cbd5ff; border:1px solid #2a3157;
+      padding:8px 10px; border-radius:10px; font-size:13px;
+    }
+    .icon-btn.danger{ border-color:#422; color:#ffd6d6; background:#1c0f16 }
+    .empty{ text-align:center; padding:18px; color:#9aa3bd; border:1px dashed #2b3055; border-radius:14px }
+    @media (hover:hover){
+      li:hover{ border-color:#3a4272 }
+      .icon-btn:hover{ filter:brightness(1.1) }
+      button:hover{ filter:brightness(1.05) }
+    }
+  </style>
+</head>
+<body>
+  <main class="app" role="application" aria-label="To-Do List">
+    <h1 class="title">📝 To-Do List</h1>
+
+    <div class="row" role="form" aria-label="Add a task">
+      <input id="task-input" type="text" placeholder="Add a new task and hit Enter…" autocomplete="off" />
+      <button id="add-btn" aria-label="Add task">Add</button>
+    </div>
+
+    <p class="muted" id="count">0 tasks • 0 done</p>
+
+    <ul id="list" aria-live="polite"></ul>
+    <div id="empty" class="empty" hidden>Nothing here yet. Add your first task above!</div>
+  </main>
+
+  <script>
+    // --- Simple To-Do with localStorage ---
+    const $ = (sel) => document.querySelector(sel);
+    const listEl   = $("#list");
+    const inputEl  = $("#task-input");
+    const addBtn   = $("#add-btn");
+    const countEl  = $("#count");
+    const emptyEl  = $("#empty");
+    const STORAGE_KEY = "todo_tasks_v1";
+
+    /** Load & Save **/
+    const load = () => JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
+    const save = (tasks) => localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
+
+    /** State **/
+    let tasks = load(); // [{id, text, done}]
+    let idSeq = tasks.reduce((m,t)=>Math.max(m,t.id), 0) + 1;
+
+    function render(){
+      listEl.innerHTML = "";
+      if(tasks.length === 0){
+        emptyEl.hidden = false;
+      } else {
+        emptyEl.hidden = true;
+      }
+      let doneCount = 0;
+
+      for(const t of tasks){
+        if(t.done) doneCount++;
+        const li = document.createElement("li");
+        li.dataset.id = t.id;
+        if(t.done) li.classList.add("done");
+
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.checked = t.done;
+        cb.setAttribute("aria-label", "Mark complete");
+
+        const span = document.createElement("span");
+        span.className = "text";
+        span.textContent = t.text;
+
+        const edit = document.createElement("button");
+        edit.className = "icon-btn";
+        edit.textContent = "Edit";
+        edit.setAttribute("aria-label", "Edit task");
+
+        const del = document.createElement("button");
+        del.className = "icon-btn danger";
+        del.textContent = "Delete";
+        del.setAttribute("aria-label", "Delete task");
+
+        li.append(cb, span, edit, del);
+        listEl.appendChild(li);
+      }
+      countEl.textContent = `${tasks.length} task${tasks.length!==1?"s":""} • ${doneCount} done`;
+    }
+
+    function addTask(text){
+      text = text.trim();
+      if(!text) return;
+      tasks.unshift({ id: idSeq++, text, done:false });
+      save(tasks); render();
+    }
+
+    /** Events **/
+    addBtn.addEventListener("click", () => {
+      addTask(inputEl.value);
+      inputEl.value = "";
+      inputEl.focus();
+    });
+
+    inputEl.addEventListener("keydown", (e) => {
+      if(e.key === "Enter"){
+        addTask(inputEl.value);
+        inputEl.value = "";
+      }
+    });
+
+    // Event delegation for list buttons
+    listEl.addEventListener("click", (e) => {
+      const li = e.target.closest("li");
+      if(!li) return;
+      const id = Number(li.dataset.id);
+      const idx = tasks.findIndex(t => t.id === id);
+      if(idx === -1) return;
+
+      if(e.target.matches('input[type="checkbox"]')){
+        tasks[idx].done = e.target.checked;
+        save(tasks); render();
+        return;
+      }
+
+      if(e.target.textContent === "Delete"){
+        tasks.splice(idx, 1);
+        save(tasks); render();
+        return;
+      }
+
+      if(e.target.textContent === "Edit"){
+        // Toggle to edit mode using contentEditable
+        const span = li.querySelector(".text");
+        e.target.textContent = "Save";
+        span.contentEditable = "true";
+        span.focus();
+        // place caret at end
+        document.execCommand && document.execCommand("selectAll", false, null);
+        document.getSelection().collapseToEnd();
+        return;
+      }
+
+      if(e.target.textContent === "Save"){
+        const span = li.querySelector(".text");
+        const newText = span.textContent.trim();
+        tasks[idx].text = newText || tasks[idx].text; // prevent empty overwrite
+        span.contentEditable = "false";
+        e.target.textContent = "Edit";
+        save(tasks); render();
+      }
+    });
+
+    // Basic swipe-to-delete for touch (optional nicety)
+    let startX = 0;
+    listEl.addEventListener("touchstart", (e)=>{
+      const li = e.target.closest("li"); if(!li) return;
+      startX = e.touches[0].clientX;
+      li.style.transition = "transform .15s ease";
+    });
+    listEl.addEventListener("touchmove", (e)=>{
+      const li = e.target.closest("li"); if(!li) return;
+      const dx = e.touches[0].clientX - startX;
+      li.style.transform = `translateX(${dx}px)`;
+    });
+    listEl.addEventListener("touchend", (e)=>{
+      const li = e.target.closest("li"); if(!li) return;
+      const dx = parseFloat(li.style.transform.replace(/[^\-0-9.]/g,""))||0;
+      li.style.transform = "";
+      if(Math.abs(dx) > 120){
+        const id = Number(li.dataset.id);
+        tasks = tasks.filter(t => t.id !== id);
+        save(tasks); render();
+      }
+    });
+
+    // First paint
+    render();
+  </script>
+</body>
+</html>
+
